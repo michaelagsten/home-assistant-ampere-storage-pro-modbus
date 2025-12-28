@@ -171,6 +171,7 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
 
         all_read_data.update(await self.read_modbus_device_data())
         all_read_data.update(await self.read_modbus_realtime_data())
+        all_read_data.update(await self.read_modbus_grid_ac_data())
         all_read_data.update(await self.read_modbus_longterm_data())
 
         await self.close()
@@ -444,3 +445,45 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
         except Exception as e:
             _LOGGER.error(f"Error reading inverter data: {e}")
             return {}
+
+    async def read_modbus_grid_ac_data(self) -> dict:
+        """
+        Reads AC grid data (phase-to-neutral / phase-to-earth voltages and grid frequency).
+
+        Register block: 0x4031 .. 0x403F (15 registers)
+        - 0x4031: RGridVolt  UInt16, scale 0.1 V
+        - 0x4033: RGridFreq  UInt16, scale 0.01 Hz
+        - 0x4038: SGridVolt  UInt16, scale 0.1 V
+        - 0x403F: TGridVolt  UInt16, scale 0.1 V
+        """
+        try:
+            register_list = await self.read_holding_registers(self._unit, 0x4031, 15)
+
+            # Offsets within this block (0-based)
+            # addr 0x4031 => idx 0
+            # addr 0x4033 => idx 2
+            # addr 0x4038 => idx 7
+            # addr 0x403F => idx 14
+            data: dict = {}
+
+            r_v_raw = register_list[0]
+            r_f_raw = register_list[2]
+            s_v_raw = register_list[7]
+            t_v_raw = register_list[14]
+
+            data["grid_voltage_l1"] = round(r_v_raw * 0.1, 1)
+            data["grid_voltage_l2"] = round(s_v_raw * 0.1, 1)
+            data["grid_voltage_l3"] = round(t_v_raw * 0.1, 1)
+            data["grid_frequency"] = round(r_f_raw * 0.01, 2)
+
+            # Optional: wenn Du die Frequenz je Phase willst (falls im Gerät belegt)
+            # s_f_raw = register_list[9]   # 0x403A - 0x4031 = 0x09
+            # t_f_raw = register_list[16]  # wäre außerhalb; deshalb nur wenn Du Block größer machst
+            # -> Für T-Frequenz (0x4041) müsstest Du ab 0x4031 count=17 lesen.
+
+            return data
+
+        except Exception as e:
+            _LOGGER.error(f"Error reading AC grid data: {e}")
+            return {}
+
