@@ -15,6 +15,7 @@ from homeassistant.const import (
     UnitOfEnergy,
     UnitOfPower,
     UnitOfTemperature,
+    UnitOfFrequency,
     PERCENTAGE,
 )
 import logging
@@ -422,4 +423,38 @@ SENSOR_TYPES: dict[str, list[AmpereModbusSensorEntityDescription]] = {
         entity_registry_enabled_default=True,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+        "GridVoltageL1": AmpereModbusSensorEntityDescription(
+        name="Grid Voltage L1",
+        key="grid_voltage_l1",
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=True,
+    ),
+    "GridVoltageL2": AmpereModbusSensorEntityDescription(
+        name="Grid Voltage L2",
+        key="grid_voltage_l2",
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=True,
+    ),
+    "GridVoltageL3": AmpereModbusSensorEntityDescription(
+        name="Grid Voltage L3",
+        key="grid_voltage_l3",
+        native_unit_of_measurement=UnitOfElectricPotential.VOLT,
+        device_class=SensorDeviceClass.VOLTAGE,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=True,
+    ),
+    "GridFrequency": AmpereModbusSensorEntityDescription(
+        name="Grid Frequency",
+        key="grid_frequency",
+        native_unit_of_measurement=UnitOfFrequency.HERTZ,
+        device_class=SensorDeviceClass.FREQUENCY,
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_registry_enabled_default=True,
+    ),
+
 }
+
