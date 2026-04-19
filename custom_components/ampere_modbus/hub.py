@@ -134,11 +134,12 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                 await self.ensure_modbus_connection()
 
                 async with self._read_lock:
-                    response = await self._client.read_holding_registers(
-                        address=address,
-                        count=count,
-                        device_id=unit,
-                    )
+                    async with asyncio.timeout(15):
+                        response = await self._client.read_holding_registers(
+                            address=address,
+                            count=count,
+                            device_id=unit,
+                        )
 
                 if not response or response.isError():
                     raise ModbusIOException(
@@ -158,13 +159,19 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
 
                 return response.registers
 
-            except (ModbusIOException, ConnectionException, AttributeError) as e:
+            except (
+                ModbusIOException,
+                ConnectionException,
+                AttributeError,
+                asyncio.TimeoutError,
+            ) as e:
                 _LOGGER.error(
-                    "Read attempt %s failed at address %s (count %s): %s",
+                    "Read attempt %s failed at address %s (count %s): %s [%s]",
                     attempt + 1,
                     hex(address),
                     count,
                     e,
+                    type(e).__name__,
                 )
 
                 if attempt < max_retries - 1:
@@ -233,18 +240,31 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
 
     async def _async_update_data(self) -> dict:
         try:
-            await self.ensure_modbus_connection()
+            async with asyncio.timeout(90):
+                await self.ensure_modbus_connection()
 
-            if not self._inverter_data:
-                self._inverter_data.update(await self.read_modbus_inverter_data())
+                if not self._inverter_data:
+                    self._inverter_data.update(await self.read_modbus_inverter_data())
 
-            all_read_data = {**self._inverter_data}
-            all_read_data.update(await self.read_modbus_device_data())
-            all_read_data.update(await self.read_modbus_realtime_data())
-            all_read_data.update(await self.read_modbus_grid_ac_data())
-            all_read_data.update(await self.read_modbus_longterm_data())
+                all_read_data = {**self._inverter_data}
+                all_read_data.update(await self.read_modbus_device_data())
+                all_read_data.update(await self.read_modbus_realtime_data())
+                all_read_data.update(await self.read_modbus_grid_ac_data())
+                all_read_data.update(await self.read_modbus_longterm_data())
 
-            return all_read_data
+                self.data = all_read_data
+                return all_read_data
+
+        except asyncio.TimeoutError as e:
+            _LOGGER.error("Timed out during Modbus update cycle: %s", e, exc_info=True)
+            if self.data:
+                return dict(self.data)
+            raise
+        except Exception as e:
+            _LOGGER.error("Error during Modbus update cycle: %s", e, exc_info=True)
+            if self.data:
+                return dict(self.data)
+            raise
         finally:
             await self.close()
 
