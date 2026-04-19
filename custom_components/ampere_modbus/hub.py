@@ -52,6 +52,7 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
 
         self._inverter_data: dict = {}
         self.data: dict = {}
+        self._suspend_until: float = 0.0
 
     def _create_client(self) -> AsyncModbusTcpClient:
         """Create a new client instance."""
@@ -239,12 +240,24 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
         return all_registers
 
     async def _async_update_data(self) -> dict:
+        loop_time = asyncio.get_running_loop().time()
+
+        if loop_time < self._suspend_until:
+            remaining = self._suspend_until - loop_time
+            _LOGGER.warning(
+                "Modbus polling suspended for %.1f more seconds after previous failure.",
+                remaining,
+            )
+            if self.data:
+                return dict(self.data)
+            raise ConnectionException("Modbus polling temporarily suspended")
+
         try:
             async with asyncio.timeout(90):
                 await self.ensure_modbus_connection()
 
                 if not self._inverter_data:
-                    self._inverter_data.update(await self.read_modbus_inverter_data())
+                    self._inverter_data = await self.read_modbus_inverter_data()
 
                 all_read_data = {**self._inverter_data}
                 all_read_data.update(await self.read_modbus_device_data())
@@ -256,12 +269,14 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                 return all_read_data
 
         except asyncio.TimeoutError as e:
+            self._suspend_until = asyncio.get_running_loop().time() + 90
             _LOGGER.error("Timed out during Modbus update cycle: %s", e, exc_info=True)
             if self.data:
                 return dict(self.data)
             raise
         except Exception as e:
-            _LOGGER.error("Error during Modbus update cycle: %s", e, exc_info=True)
+            self._suspend_until = asyncio.get_running_loop().time() + 90
+            _LOGGER.error("Modbus update cycle failed completely: %s", e, exc_info=True)
             if self.data:
                 return dict(self.data)
             raise
@@ -372,8 +387,8 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
 
             return data
         except Exception as e:
-            _LOGGER.error("Error reading inverter data: %s", e)
-            return {}
+            _LOGGER.error("Error reading inverter data: %s", e, exc_info=True)
+            raise
 
     async def read_modbus_device_data(self) -> dict:
         try:
@@ -402,8 +417,8 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
 
             return data
         except Exception as e:
-            _LOGGER.error("Error reading inverter data: %s", e)
-            return {}
+            _LOGGER.error("Error reading device data: %s", e, exc_info=True)
+            raise
 
     async def read_modbus_realtime_data(self) -> dict:
         try:
@@ -481,8 +496,8 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
             return data
 
         except Exception as e:
-            _LOGGER.error("Error reading inverter data: %s", e)
-            return {}
+            _LOGGER.error("Error reading realtime data: %s", e, exc_info=True)
+            raise
 
     async def read_modbus_longterm_data(self) -> dict:
         try:
@@ -549,8 +564,8 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
             return data
 
         except Exception as e:
-            _LOGGER.error("Error reading inverter data: %s", e)
-            return {}
+            _LOGGER.error("Error reading longterm data: %s", e, exc_info=True)
+            raise
 
     async def read_modbus_grid_ac_data(self) -> dict:
         """
@@ -580,5 +595,5 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
             return data
 
         except Exception as e:
-            _LOGGER.error("Error reading AC grid data: %s", e)
-            return {}
+            _LOGGER.error("Error reading AC grid data: %s", e, exc_info=True)
+            raise
