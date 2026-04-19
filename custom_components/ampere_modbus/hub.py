@@ -440,8 +440,32 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
             value, position = self.decode_32bit_uint(registerList, position)
             data["totaldischargebattery"] = round(value * 0.01, 2)
 
-            return data
+            # 40D7..40ED überspringen:
+            # InvGenEnergy + TotalLoadEnergy + BackupLoadEnergy
+            position += 12  # 12 x UInt32 = 24 Register
 
+            # 40EF..40F5: SellEnergy (Tag/Monat/Jahr/Gesamt)
+            value, position = self.decode_32bit_uint(registerList, position)
+            data["dailygridexportenergy"] = round(value * 0.01, 2)
+            value, position = self.decode_32bit_uint(registerList, position)
+            data["monthgridexportenergy"] = round(value * 0.01, 2)
+            value, position = self.decode_32bit_uint(registerList, position)
+            data["yeargridexportenergy"] = round(value * 0.01, 2)
+            value, position = self.decode_32bit_uint(registerList, position)
+            data["totalgridexportenergy"] = round(value * 0.01, 2)
+
+            # 40F7..40FD: FeedInEnergy (Tag/Monat/Jahr/Gesamt)
+            value, position = self.decode_32bit_uint(registerList, position)
+            data["dailygridimportenergy"] = round(value * 0.01, 2)
+            value, position = self.decode_32bit_uint(registerList, position)
+            data["monthgridimportenergy"] = round(value * 0.01, 2)
+            value, position = self.decode_32bit_uint(registerList, position)
+            data["yeargridimportenergy"] = round(value * 0.01, 2)
+            value, position = self.decode_32bit_uint(registerList, position)
+            data["totalgridimportenergy"] = round(value * 0.01, 2)
+
+            return data
+    
         except Exception as e:
             _LOGGER.error(f"Error reading inverter data: {e}")
             return {}
