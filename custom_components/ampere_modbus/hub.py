@@ -56,16 +56,28 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
         self._last_good_grid_ac_data: dict = {}
 
     def _create_client(self) -> AsyncModbusTcpClient:
-        """Create a new client instance."""
-        client = AsyncModbusTcpClient(
-            host=self._host,
-            port=self._port,
-            timeout=10,
-        )
+        """Create a new client instance with auto reconnect disabled if supported."""
+        kwargs = {
+            "host": self._host,
+            "port": self._port,
+            "timeout": 10,
+        }
+
+        try:
+            sig = inspect.signature(AsyncModbusTcpClient.__init__)
+            if "reconnect_delay" in sig.parameters:
+                kwargs["reconnect_delay"] = 0
+            if "reconnect_delay_max" in sig.parameters:
+                kwargs["reconnect_delay_max"] = 0
+        except Exception as e:
+            _LOGGER.debug("Could not inspect AsyncModbusTcpClient signature: %s", e)
+
+        client = AsyncModbusTcpClient(**kwargs)
         _LOGGER.debug(
-            "Created new Modbus client: AsyncModbusTcpClient %s:%s",
+            "Created new Modbus client: AsyncModbusTcpClient %s:%s with kwargs=%s",
             self._host,
             self._port,
+            kwargs,
         )
         return client
 
@@ -119,6 +131,7 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                 _LOGGER.info("Successfully connected to Modbus server.")
             except Exception as e:
                 await self._safe_close()
+                await asyncio.sleep(0.2)
                 _LOGGER.warning("Error during connection attempt: %s", e, exc_info=True)
                 raise ConnectionException("Failed to connect to Modbus server.") from e
 
@@ -254,6 +267,10 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                 "Modbus polling suspended for %.1f more seconds after previous failure.",
                 remaining,
             )
+
+            # Make sure no stale pymodbus client keeps reconnecting in background
+            await self.close()
+
             if self.data:
                 return dict(self.data)
             raise ConnectionException("Modbus polling temporarily suspended")
