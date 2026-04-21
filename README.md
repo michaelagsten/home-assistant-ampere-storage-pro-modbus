@@ -1,7 +1,21 @@
 [![hacs_badge](https://img.shields.io/badge/HACS-Default-orange.svg)](https://github.com/custom-components/hacs)
 
 # A Home Assistant custom component for Ampere.StoragePro inverters
-Home Assistant custom component for reading data locally from Ampere.StoragePro inverter through modbus TCP 
+Home Assistant custom component for reading data locally from Ampere.StoragePro inverter through modbus TCP
+
+This is a parallel branch to the original implementation of https://github.com/dboeni/home-assistant-ampere-storage-pro-modbus.
+
+The main differences compared to the upstream version are:
+
+* Improved Modbus stability through strict connection lifecycle management (explicit connect/close handling, no implicit reconnect loops)
+* Robust register reading with automatic chunking to stay within Modbus limits and avoid read errors on larger blocks
+* Retry and backoff logic for transient communication failures
+* Controlled polling suspension after repeated failures to prevent connection storms and system overload
+* Additional data points, including extended long-term energy statistics (import/export, daily/monthly/yearly/total)
+* Added AC grid measurements (phase voltages and frequency)
+* Plausibility checks and caching for unstable or temporarily invalid inverter values (e.g. zero readings during refresh cycles)
+* General improvements in error handling, logging, and resilience under unstable network conditions
+* Enables stable parallel Modbus operation together with Kiwigrid HEMS without causing Modbus communication freezes
 
 ## Features
 
