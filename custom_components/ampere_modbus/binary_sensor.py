@@ -6,7 +6,6 @@ from typing import Optional
 from homeassistant.components.binary_sensor import (
     BinarySensorEntity,
     BinarySensorEntityDescription,
-    BinarySensorDeviceClass,
 )
 from homeassistant.const import CONF_NAME
 from homeassistant.helpers.entity import EntityCategory
@@ -17,6 +16,7 @@ from .hub import AmpereStorageProModbusHub
 
 
 async def async_setup_entry(hass, entry, async_add_entities):
+    """Set up Ampere Modbus binary sensors from a config entry."""
     hub_name = entry.data[CONF_NAME]
     hub = hass.data[DOMAIN][hub_name]["hub"]
 
@@ -26,19 +26,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
         "manufacturer": ATTR_MANUFACTURER,
     }
 
-    entities = []
-    for description in BINARY_SENSOR_TYPES.values():
-        entities.append(
-            AmpereBinarySensor(
-                hub_name,
-                hub,
-                device_info,
-                description,
-            )
-        )
+    entities = [
+        AmpereBinarySensor(hub_name, hub, device_info, description)
+        for description in BINARY_SENSOR_TYPES.values()
+    ]
 
     async_add_entities(entities)
-    return True
 
 
 class AmpereBinarySensor(CoordinatorEntity, BinarySensorEntity):
@@ -63,7 +56,7 @@ class AmpereBinarySensor(CoordinatorEntity, BinarySensorEntity):
 
     @property
     def unique_id(self) -> Optional[str]:
-        return f"{self._platform_name}_{self.entity_description.key}"
+        return f"{self._platform_name}_binary_{self.entity_description.key}"
 
     @property
     def is_on(self) -> Optional[bool]:
