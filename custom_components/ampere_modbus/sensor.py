@@ -1,6 +1,5 @@
 from __future__ import annotations
 from dataclasses import dataclass
-from datetime import datetime
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.components.sensor import (
     SensorEntity,
@@ -22,14 +21,11 @@ import logging
 from typing import Optional
 
 from homeassistant.const import CONF_NAME
-from homeassistant.core import callback
-import homeassistant.util.dt as dt_util
 
 from .const import (
     ATTR_MANUFACTURER,
     DOMAIN,
 )
-
 from .hub import AmpereStorageProModbusHub
 
 _LOGGER = logging.getLogger(__name__)
@@ -97,10 +93,10 @@ class AmpereSensor(CoordinatorEntity, SensorEntity):
 
 @dataclass
 class AmpereModbusSensorEntityDescription(SensorEntityDescription):
-    """A class that describes Zoonneplan sensor entities."""
+    """Description for Ampere Modbus sensor entities."""
 
 
-SENSOR_TYPES: dict[str, list[AmpereModbusSensorEntityDescription]] = {
+SENSOR_TYPES: dict[str, AmpereModbusSensorEntityDescription] = {
     "DeviceType": AmpereModbusSensorEntityDescription(
         name="Device Type",
         key="devicetype",
@@ -416,6 +412,13 @@ SENSOR_TYPES: dict[str, list[AmpereModbusSensorEntityDescription]] = {
         entity_registry_enabled_default=True,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
+    "DeviceStatusRaw": AmpereModbusSensorEntityDescription(
+        name="Device Status Raw",
+        key="devicestatus_raw",
+        icon="mdi:counter",
+        entity_registry_enabled_default=True,
+        entity_category=EntityCategory.DIAGNOSTIC,
+    ),
     "DeviceError": AmpereModbusSensorEntityDescription(
         name="Device Error",
         key="deviceerror",
@@ -423,7 +426,7 @@ SENSOR_TYPES: dict[str, list[AmpereModbusSensorEntityDescription]] = {
         entity_registry_enabled_default=True,
         entity_category=EntityCategory.DIAGNOSTIC,
     ),
-        "GridVoltageL1": AmpereModbusSensorEntityDescription(
+    "GridVoltageL1": AmpereModbusSensorEntityDescription(
         name="Grid Voltage L1",
         key="grid_voltage_l1",
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
@@ -455,22 +458,64 @@ SENSOR_TYPES: dict[str, list[AmpereModbusSensorEntityDescription]] = {
         state_class=SensorStateClass.MEASUREMENT,
         entity_registry_enabled_default=True,
     ),
-
-    "TotalGridExportEnergy": AmpereModbusSensorEntityDescription(
-    name="Total Grid Export Energy",
-    key="totalgridexportenergy",
-    native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-    device_class=SensorDeviceClass.ENERGY,
-    state_class=SensorStateClass.TOTAL_INCREASING,
+    "DailyGridImportEnergy": AmpereModbusSensorEntityDescription(
+        name="Daily Grid Import Energy",
+        key="dailygridimportenergy",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
     ),
-
+    "MonthGridImportEnergy": AmpereModbusSensorEntityDescription(
+        name="Month Grid Import Energy",
+        key="monthgridimportenergy",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_registry_enabled_default=False,
+    ),
+    "YearGridImportEnergy": AmpereModbusSensorEntityDescription(
+        name="Year Grid Import Energy",
+        key="yeargridimportenergy",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_registry_enabled_default=False,
+    ),
     "TotalGridImportEnergy": AmpereModbusSensorEntityDescription(
-    name="Total Grid Import Energy",
-    key="totalgridimportenergy",
-    native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
-    device_class=SensorDeviceClass.ENERGY,
-    state_class=SensorStateClass.TOTAL_INCREASING,
+        name="Total Grid Import Energy",
+        key="totalgridimportenergy",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
     ),
-
+    "DailyGridExportEnergy": AmpereModbusSensorEntityDescription(
+        name="Daily Grid Export Energy",
+        key="dailygridexportenergy",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+    ),
+    "MonthGridExportEnergy": AmpereModbusSensorEntityDescription(
+        name="Month Grid Export Energy",
+        key="monthgridexportenergy",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_registry_enabled_default=False,
+    ),
+    "YearGridExportEnergy": AmpereModbusSensorEntityDescription(
+        name="Year Grid Export Energy",
+        key="yeargridexportenergy",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        entity_registry_enabled_default=False,
+    ),
+    "TotalGridExportEnergy": AmpereModbusSensorEntityDescription(
+        name="Total Grid Export Energy",
+        key="totalgridexportenergy",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL_INCREASING,
+    ),
 }
-
