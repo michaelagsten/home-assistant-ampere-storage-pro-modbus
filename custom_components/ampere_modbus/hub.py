@@ -53,6 +53,7 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
         self._inverter_data: dict = {}
         self.data: dict = {}
         self._suspend_until: float = 0.0
+        self._failure_count: int = 0
         self._last_good_grid_ac_data: dict = {}
 
     def _create_client(self) -> AsyncModbusTcpClient:
@@ -91,15 +92,20 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                 close = getattr(self._client, "close", None)
                 if close:
                     await close() if inspect.iscoroutinefunction(close) else close()
+
                 transport = getattr(self._client, "transport", None)
                 if transport:
                     transport.close()
+
                 await asyncio.sleep(0.2)
                 return not self._client.connected
+
             return True
+
         except Exception as e:
             _LOGGER.warning("Error during safe close: %s", e, exc_info=True)
             return False
+
         finally:
             self._client = None
 
@@ -125,10 +131,12 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                 return
 
             self._client = self._client or self._create_client()
+
             try:
                 await asyncio.wait_for(self._client.connect(), timeout=10)
                 await asyncio.sleep(0.3)
                 _LOGGER.info("Successfully connected to Modbus server.")
+
             except Exception as e:
                 await self._safe_close()
                 await asyncio.sleep(0.2)
@@ -140,90 +148,66 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
         unit: int,
         address: int,
         count: int,
-        max_retries: int = 3,
+        max_retries: int = 1,
         base_delay: float = 2.0,
     ) -> List[int]:
-        """Read one Modbus holding-register block with error handling."""
+        """Read one Modbus holding-register block with strict fail-fast behavior."""
         if count <= 0:
             return []
 
-        for attempt in range(max_retries):
-            try:
-                await self.ensure_modbus_connection()
+        try:
+            await self.ensure_modbus_connection()
 
-                async with self._read_lock:
-                    async with asyncio.timeout(15):
-                        response = await self._client.read_holding_registers(
-                            address=address,
-                            count=count,
-                            device_id=unit,
-                        )
-
-                if not response or response.isError():
-                    raise ModbusIOException(
-                        f"Invalid Modbus response from address {hex(address)}, count {count}"
+            async with self._read_lock:
+                async with asyncio.timeout(15):
+                    response = await self._client.read_holding_registers(
+                        address=address,
+                        count=count,
+                        device_id=unit,
                     )
 
-                if not hasattr(response, "registers") or response.registers is None:
-                    raise ModbusIOException(
-                        f"No registers returned from address {hex(address)}, count {count}"
-                    )
-
-                if len(response.registers) != count:
-                    raise ModbusIOException(
-                        f"Register length mismatch at address {hex(address)}: "
-                        f"expected {count}, got {len(response.registers)}"
-                    )
-
-                return response.registers
-
-            except (
-                ModbusIOException,
-                ConnectionException,
-                AttributeError,
-                asyncio.TimeoutError,
-            ) as e:
-                _LOGGER.error(
-                    "Read attempt %s failed at address %s (count %s): %s [%s]",
-                    attempt + 1,
-                    hex(address),
-                    count,
-                    e,
-                    type(e).__name__,
+            if not response or response.isError():
+                raise ModbusIOException(
+                    f"Invalid Modbus response from address {hex(address)}, count {count}"
                 )
 
-                await self._safe_close()
+            if not hasattr(response, "registers") or response.registers is None:
+                raise ModbusIOException(
+                    f"No registers returned from address {hex(address)}, count {count}"
+                )
 
-                if attempt < max_retries - 1:
-                    delay = min(base_delay * (2**attempt), 10.0)
-                    await asyncio.sleep(delay)
+            if len(response.registers) != count:
+                raise ModbusIOException(
+                    f"Register length mismatch at address {hex(address)}: "
+                    f"expected {count}, got {len(response.registers)}"
+                )
 
-                    try:
-                        await self.ensure_modbus_connection()
-                    except ConnectionException:
-                        _LOGGER.error("Failed to reconnect Modbus client.")
-                        continue
-                    else:
-                        _LOGGER.info("Reconnected Modbus client successfully.")
+            return response.registers
 
-        _LOGGER.error(
-            "Failed to read registers from unit %s, address %s, count %s after %s attempts",
-            unit,
-            hex(address),
-            count,
-            max_retries,
-        )
-        raise ConnectionException(
-            f"Read operation failed for address {hex(address)}, count {count} "
-            f"after {max_retries} attempts"
-        )
+        except (
+            ModbusIOException,
+            ConnectionException,
+            AttributeError,
+            asyncio.TimeoutError,
+        ) as e:
+            _LOGGER.error(
+                "Read failed at address %s (count %s): %s [%s]",
+                hex(address),
+                count,
+                e,
+                type(e).__name__,
+            )
+            await self._safe_close()
+            raise ConnectionException(
+                f"Read operation failed for address {hex(address)}, count {count}"
+            ) from e
 
     async def read_holding_registers(
         self,
         unit: int,
         address: int,
         count: int,
-        max_retries: int = 3,
+        max_retries: int = 1,
         base_delay: float = 2.0,
     ) -> List[int]:
         """
@@ -250,6 +234,7 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                 max_retries=max_retries,
                 base_delay=base_delay,
             )
+
             all_registers.extend(chunk)
             offset += chunk_count
 
@@ -268,11 +253,11 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                 remaining,
             )
 
-            # Make sure no stale pymodbus client keeps reconnecting in background
             await self.close()
 
             if self.data:
                 return dict(self.data)
+
             raise ConnectionException("Modbus polling temporarily suspended")
 
         try:
@@ -289,20 +274,49 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                 all_read_data.update(await self.read_modbus_longterm_data())
 
                 self.data = all_read_data
+                self._failure_count = 0
+                self._suspend_until = 0.0
+
                 return all_read_data
 
         except asyncio.TimeoutError as e:
-            self._suspend_until = asyncio.get_running_loop().time() + 120
-            _LOGGER.error("Timed out during Modbus update cycle: %s", e, exc_info=True)
+            self._failure_count += 1
+            cooldown = min(120 * self._failure_count, 300)
+            self._suspend_until = asyncio.get_running_loop().time() + cooldown
+
+            _LOGGER.error(
+                "Timed out during Modbus update cycle. "
+                "Suspending polling for %s seconds after %s consecutive failure(s): %s",
+                cooldown,
+                self._failure_count,
+                e,
+                exc_info=True,
+            )
+
             if self.data:
                 return dict(self.data)
+
             raise
+
         except Exception as e:
-            self._suspend_until = asyncio.get_running_loop().time() + 120
-            _LOGGER.error("Modbus update cycle failed completely: %s", e, exc_info=True)
+            self._failure_count += 1
+            cooldown = min(120 * self._failure_count, 300)
+            self._suspend_until = asyncio.get_running_loop().time() + cooldown
+
+            _LOGGER.error(
+                "Modbus update cycle failed completely. "
+                "Suspending polling for %s seconds after %s consecutive failure(s): %s",
+                cooldown,
+                self._failure_count,
+                e,
+                exc_info=True,
+            )
+
             if self.data:
                 return dict(self.data)
+
             raise
+
         finally:
             await self.close()
 
@@ -397,18 +411,24 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
 
             value, position = self.decode_16bit_uint(register_list, position)
             data["dv"] = round(value * 0.001, 3)
+
             value, position = self.decode_16bit_uint(register_list, position)
             data["mcv"] = round(value * 0.001, 3)
+
             value, position = self.decode_16bit_uint(register_list, position)
             data["scv"] = round(value * 0.001, 3)
+
             value, position = self.decode_16bit_uint(register_list, position)
             data["disphwversion"] = round(value * 0.001, 3)
+
             value, position = self.decode_16bit_uint(register_list, position)
             data["ctrlhwversion"] = round(value * 0.001, 3)
+
             value, position = self.decode_16bit_uint(register_list, position)
             data["powerhwversion"] = round(value * 0.001, 3)
 
             return data
+
         except Exception as e:
             _LOGGER.error("Error reading inverter data: %s", e, exc_info=True)
             raise
@@ -439,9 +459,11 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
             error_messages.extend(
                 msg for code, msg in FAULT_MESSAGES[2].items() if fault3 & code
             )
+
             data["deviceerror"] = ", ".join(error_messages).strip()[:254]
 
             return data
+
         except Exception as e:
             _LOGGER.error("Error reading device data: %s", e, exc_info=True)
             raise
@@ -458,44 +480,50 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
             value, position = self.decode_16bit_int(register_list, position)
             data["batterycurrent"] = round(value * 0.01, 2)
 
-            position += 2  # skip 4 bytes
+            position += 2
 
             value, position = self.decode_16bit_int(register_list, position)
             data["batterypower"] = round(value * 1, 0)
+
             value, position = self.decode_16bit_int(register_list, position)
             data["batterytemperature"] = round(value * 0.1, 0)
+
             value, position = self.decode_16bit_uint(register_list, position)
             data["batterypercent"] = round(value * 0.01, 0)
 
-            position += 1  # skip 2 bytes
+            position += 1
 
             value, position = self.decode_16bit_uint(register_list, position)
             data["pv1volt"] = round(value * 0.1, 1)
+
             value, position = self.decode_16bit_uint(register_list, position)
             data["pv1curr"] = round(value * 0.01, 2)
+
             pv1power, position = self.decode_16bit_uint(register_list, position)
             data["pv1power"] = round(pv1power * 1, 0)
 
             value, position = self.decode_16bit_uint(register_list, position)
             data["pv2volt"] = round(value * 0.1, 1)
+
             value, position = self.decode_16bit_uint(register_list, position)
             data["pv2curr"] = round(value * 0.01, 2)
+
             pv2power, position = self.decode_16bit_uint(register_list, position)
             data["pv2power"] = round(pv2power * 1, 0)
 
             data["totalpvpower"] = round(pv1power * 1, 0) + round(pv2power * 1, 0)
 
-            position += 6   # skip pv3 & pv4 = 12 bytes
-            position += 16  # skip unknown = 32 bytes
+            position += 6
+            position += 16
 
-            position += 1  # V Volt (R)
-            position += 1  # A Current (R)
-            position += 1  # Hz Frequenz (R)
-            position += 1  # W Power L1 (R)
-            position += 1  # A Current L2 (S)
-            position += 1  # W Power L2 (S)
-            position += 1  # A Current L3 (T)
-            position += 1  # W Power L3 (T)
+            position += 1
+            position += 1
+            position += 1
+            position += 1
+            position += 1
+            position += 1
+            position += 1
+            position += 1
 
             value, position = self.decode_16bit_int(register_list, position)
             data["pvflow"] = value
@@ -509,15 +537,17 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
             data["gridflow"] = value
             data["gridflowtext"] = GRID_DIRECTION.get(value, "Unknown")
 
-            position += 1  # flow load
-            position += 7  # reserved
+            position += 1
+            position += 7
 
-            position += 1  # total system load consumes power
+            position += 1
+
             value, position = self.decode_16bit_int(register_list, position)
             data["gridpower"] = value
-            position += 1  # CT Apparent power of the grid
-            position += 1  # CT PV real power
-            position += 1  # CT PV Apparent power
+
+            position += 1
+            position += 1
+            position += 1
 
             return data
 
@@ -527,65 +557,73 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
 
     async def read_modbus_longterm_data(self) -> dict:
         try:
-            # 0x40BF .. 0x4176 exclusive => 184 registers
             register_list = await self.read_holding_registers(self._unit, 0x40BF, 184)
             position = 0
             data = {}
 
-            # --- PV ---
             value, position = self.decode_32bit_uint(register_list, position)
-            data["dailypvgeneration"] = round(value * 0.01, 2)       # 0x40BF
-            value, position = self.decode_32bit_uint(register_list, position)
-            data["monthpvgeneration"] = round(value * 0.01, 2)       # 0x40C1
-            value, position = self.decode_32bit_uint(register_list, position)
-            data["yearpvgeneration"] = round(value * 0.01, 2)        # 0x40C3
-            value, position = self.decode_32bit_uint(register_list, position)
-            data["totalpvgeneration"] = round(value * 0.01, 2)       # 0x40C5
+            data["dailypvgeneration"] = round(value * 0.01, 2)
 
-            # --- Battery charge ---
             value, position = self.decode_32bit_uint(register_list, position)
-            data["dailychargebattery"] = round(value * 0.01, 2)      # 0x40C7
-            value, position = self.decode_32bit_uint(register_list, position)
-            data["monthchargebattery"] = round(value * 0.01, 2)      # 0x40C9
-            value, position = self.decode_32bit_uint(register_list, position)
-            data["yearchargebattery"] = round(value * 0.01, 2)       # 0x40CB
-            value, position = self.decode_32bit_uint(register_list, position)
-            data["totalchargebattery"] = round(value * 0.01, 2)      # 0x40CD
+            data["monthpvgeneration"] = round(value * 0.01, 2)
 
-            # --- Battery discharge ---
             value, position = self.decode_32bit_uint(register_list, position)
-            data["dailydischargebattery"] = round(value * 0.01, 2)   # 0x40CF
-            value, position = self.decode_32bit_uint(register_list, position)
-            data["monthdischargebattery"] = round(value * 0.01, 2)   # 0x40D1
-            value, position = self.decode_32bit_uint(register_list, position)
-            data["yeardischargebattery"] = round(value * 0.01, 2)    # 0x40D3
-            value, position = self.decode_32bit_uint(register_list, position)
-            data["totaldischargebattery"] = round(value * 0.01, 2)   # 0x40D5
+            data["yearpvgeneration"] = round(value * 0.01, 2)
 
-            # Direktsprung auf 0x4167
-            target_offset = 0x4167 - 0x40BF  # 168 Register
+            value, position = self.decode_32bit_uint(register_list, position)
+            data["totalpvgeneration"] = round(value * 0.01, 2)
+
+            value, position = self.decode_32bit_uint(register_list, position)
+            data["dailychargebattery"] = round(value * 0.01, 2)
+
+            value, position = self.decode_32bit_uint(register_list, position)
+            data["monthchargebattery"] = round(value * 0.01, 2)
+
+            value, position = self.decode_32bit_uint(register_list, position)
+            data["yearchargebattery"] = round(value * 0.01, 2)
+
+            value, position = self.decode_32bit_uint(register_list, position)
+            data["totalchargebattery"] = round(value * 0.01, 2)
+
+            value, position = self.decode_32bit_uint(register_list, position)
+            data["dailydischargebattery"] = round(value * 0.01, 2)
+
+            value, position = self.decode_32bit_uint(register_list, position)
+            data["monthdischargebattery"] = round(value * 0.01, 2)
+
+            value, position = self.decode_32bit_uint(register_list, position)
+            data["yeardischargebattery"] = round(value * 0.01, 2)
+
+            value, position = self.decode_32bit_uint(register_list, position)
+            data["totaldischargebattery"] = round(value * 0.01, 2)
+
+            target_offset = 0x4167 - 0x40BF
             if position < target_offset:
                 position = target_offset
 
-            # --- Sum FeedIn = Netzbezug / Import ---
             value, position = self.decode_32bit_uint(register_list, position)
-            data["dailygridimportenergy"] = round(value * 0.01, 2)   # 0x4167
-            value, position = self.decode_32bit_uint(register_list, position)
-            data["monthgridimportenergy"] = round(value * 0.01, 2)   # 0x4169
-            value, position = self.decode_32bit_uint(register_list, position)
-            data["yeargridimportenergy"] = round(value * 0.01, 2)    # 0x416B
-            value, position = self.decode_32bit_uint(register_list, position)
-            data["totalgridimportenergy"] = round(value * 0.01, 2)   # 0x416D
+            data["dailygridimportenergy"] = round(value * 0.01, 2)
 
-            # --- Sum Sell = Netzeinspeisung / Export ---
             value, position = self.decode_32bit_uint(register_list, position)
-            data["dailygridexportenergy"] = round(value * 0.01, 2)   # 0x416F
+            data["monthgridimportenergy"] = round(value * 0.01, 2)
+
             value, position = self.decode_32bit_uint(register_list, position)
-            data["monthgridexportenergy"] = round(value * 0.01, 2)   # 0x4171
+            data["yeargridimportenergy"] = round(value * 0.01, 2)
+
             value, position = self.decode_32bit_uint(register_list, position)
-            data["yeargridexportenergy"] = round(value * 0.01, 2)    # 0x4173
+            data["totalgridimportenergy"] = round(value * 0.01, 2)
+
             value, position = self.decode_32bit_uint(register_list, position)
-            data["totalgridexportenergy"] = round(value * 0.01, 2)   # 0x4175
+            data["dailygridexportenergy"] = round(value * 0.01, 2)
+
+            value, position = self.decode_32bit_uint(register_list, position)
+            data["monthgridexportenergy"] = round(value * 0.01, 2)
+
+            value, position = self.decode_32bit_uint(register_list, position)
+            data["yeargridexportenergy"] = round(value * 0.01, 2)
+
+            value, position = self.decode_32bit_uint(register_list, position)
+            data["totalgridexportenergy"] = round(value * 0.01, 2)
 
             return data
 
@@ -596,31 +634,20 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
     async def read_modbus_grid_ac_data(self) -> dict:
         """
         Reads AC grid data and suppresses short invalid zero/implausible readings.
-
-        Register block: 0x4031 .. 0x403F (15 registers)
-        - 0x4031: RGridVolt, scale 0.1 V
-        - 0x4033: RGridFreq, scale 0.01 Hz
-        - 0x4038: SGridVolt, scale 0.1 V
-        - 0x403F: TGridVolt, scale 0.1 V
-
-        Some SAJ devices occasionally return invalid zero values for grid AC data
-        during an internal refresh/rollover. In that case, the last plausible values
-        are kept to avoid polluting Home Assistant statistics.
         """
         try:
             register_list = await self.read_holding_registers(self._unit, 0x4031, 15)
 
-            r_v_raw = register_list[0]    # 0x4031
-            r_f_raw = register_list[2]    # 0x4033
-            s_v_raw = register_list[7]    # 0x4038
-            t_v_raw = register_list[14]   # 0x403F
+            r_v_raw = register_list[0]
+            r_f_raw = register_list[2]
+            s_v_raw = register_list[7]
+            t_v_raw = register_list[14]
 
             grid_voltage_l1 = round(r_v_raw * 0.1, 1)
             grid_voltage_l2 = round(s_v_raw * 0.1, 1)
             grid_voltage_l3 = round(t_v_raw * 0.1, 1)
             grid_frequency = round(r_f_raw * 0.01, 2)
 
-            # Plausibility checks for normal LV grid operation
             freq_valid = 45.0 <= grid_frequency <= 55.0
             v1_valid = 100.0 <= grid_voltage_l1 <= 300.0
             v2_valid = 100.0 <= grid_voltage_l2 <= 300.0
@@ -648,8 +675,8 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
             if self._last_good_grid_ac_data:
                 if all_zero:
                     _LOGGER.warning(
-                        "Ignoring temporary zero grid AC reading from inverter "
-                        "(likely internal refresh/rollover). Keeping last valid values."
+                        "Ignoring temporary zero grid AC reading from inverter. "
+                        "Keeping last valid values."
                     )
                 else:
                     _LOGGER.warning(
