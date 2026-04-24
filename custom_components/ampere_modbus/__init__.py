@@ -35,7 +35,7 @@ CONFIG_SCHEMA = vol.Schema(
     {DOMAIN: vol.Schema({cv.slug: AMPERE_MODBUS_SCHEMA})}, extra=vol.ALLOW_EXTRA
 )
 
-PLATFORMS = ["sensor", "binary_sensor"]
+PLATFORMS: list[str] = ["sensor", "binary_sensor"]
 
 
 async def async_setup(hass: HomeAssistant, config):
@@ -52,10 +52,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
     unit = entry.data[CONF_UNIT]
     scan_interval = entry.data[CONF_SCAN_INTERVAL]
 
-    _LOGGER.debug("Setup %s.%s", DOMAIN, name)
+    _LOGGER.debug("Setup %s.%s with platforms: %s", DOMAIN, name, PLATFORMS)
 
     hub = AmpereStorageProModbusHub(hass, name, host, port, unit, scan_interval)
-    await hub.async_config_entry_first_refresh()
+
+    try:
+        await hub.async_config_entry_first_refresh()
+    except Exception:
+        await hub.close()
+        _LOGGER.exception("Initial refresh failed for %s.%s", DOMAIN, name)
+        raise
 
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][name] = {"hub": hub}
@@ -72,8 +78,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry):
     if unloaded:
         name = entry.data[CONF_NAME]
         hub_data = hass.data.get(DOMAIN, {}).get(name)
+
         if hub_data and "hub" in hub_data:
             await hub_data["hub"].close()
-        hass.data[DOMAIN].pop(name, None)
+
+        hass.data.get(DOMAIN, {}).pop(name, None)
 
     return unloaded
