@@ -30,6 +30,19 @@ DEFAULT_PV_NOMINAL_POWER_KW = 0.0
 DEFAULT_INVERTER_NOMINAL_POWER_KW = 0.0
 
 
+def _default_for_required_string(
+    defaults: dict[str, Any], key: str, fallback: str | None = None
+) -> str | type[vol.UNDEFINED]:
+    """Return a valid default for a required string field.
+
+    Voluptuous must not receive None as default for required string fields.
+    """
+    value = defaults.get(key, fallback)
+    if value is None:
+        return vol.UNDEFINED
+    return str(value)
+
+
 def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
     """Return the config/options schema with optional defaults."""
     defaults = defaults or {}
@@ -38,11 +51,11 @@ def _data_schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
         {
             vol.Required(
                 CONF_NAME,
-                default=defaults.get(CONF_NAME, DEFAULT_NAME),
+                default=_default_for_required_string(defaults, CONF_NAME, DEFAULT_NAME),
             ): cv.string,
             vol.Required(
                 CONF_HOST,
-                default=defaults.get(CONF_HOST, vol.UNDEFINED),
+                default=_default_for_required_string(defaults, CONF_HOST, None),
             ): cv.string,
             vol.Required(
                 CONF_PORT,
@@ -120,7 +133,6 @@ def _normalize_user_input(user_input: dict[str, Any]) -> dict[str, Any]:
     if CONF_NAME in normalized and isinstance(normalized[CONF_NAME], str):
         normalized[CONF_NAME] = normalized[CONF_NAME].strip() or DEFAULT_NAME
 
-    # Normalize empty/None rating values to 0.0.
     for key in (
         CONF_BATTERY_NOMINAL_CAPACITY_KWH,
         CONF_PV_NOMINAL_POWER_KW,
@@ -180,16 +192,20 @@ class AmpereModbusOptionsFlowHandler(config_entries.OptionsFlow):
     """Handle Ampere Modbus options changes."""
 
     def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        """Initialize the options flow."""
-        self.config_entry = config_entry
+        """Initialize the options flow.
+
+        Do not assign to self.config_entry. In current Home Assistant versions
+        OptionsFlow already exposes config_entry as a read-only property.
+        """
+        self._config_entry = config_entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None):
         """Manage integration options."""
         errors: dict[str, str] = {}
 
         current_values = {
-            **self.config_entry.data,
-            **self.config_entry.options,
+            **self._config_entry.data,
+            **self._config_entry.options,
         }
 
         if user_input is not None:
@@ -198,11 +214,11 @@ class AmpereModbusOptionsFlowHandler(config_entries.OptionsFlow):
             if not host_valid(user_input[CONF_HOST]):
                 errors[CONF_HOST] = "invalid_host"
             else:
-                new_data = dict(self.config_entry.data)
+                new_data = dict(self._config_entry.data)
                 new_data.update(user_input)
 
                 self.hass.config_entries.async_update_entry(
-                    self.config_entry,
+                    self._config_entry,
                     title=user_input[CONF_NAME],
                     data=new_data,
                     options={},
