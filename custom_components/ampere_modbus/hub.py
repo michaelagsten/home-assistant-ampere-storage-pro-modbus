@@ -43,8 +43,8 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
     MAX_REGISTERS_PER_READ = 30
 
     # Battery / BMS peripheral data.
-    # 0xA000..0xA023 contains battery count, capacity, online mask and
-    # SOC/SOH/voltage/current/temperature/cycles for up to 4 battery modules.
+    # 0xA000..0xA011 contains battery count, capacity, online mask and
+    # SOC/SOH/voltage/current/temperature/cycles for the reported battery stack.
     BATTERY_DATA_START_REGISTER = 0xA000
     BATTERY_DATA_REGISTER_COUNT = 0x0012
 
@@ -181,7 +181,9 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
     async def ensure_modbus_connection(self) -> None:
         """Ensure that the Modbus TCP connection is established."""
         if self._is_stopping():
-            raise ConnectionException("Home Assistant is stopping; Modbus connection skipped.")
+            raise ConnectionException(
+                "Home Assistant is stopping; Modbus connection skipped."
+            )
 
         async with self._connection_lock:
             if self._client and self._client.connected:
@@ -197,14 +199,22 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                 await asyncio.sleep(0.30)
 
                 if not self._client.connected:
-                    raise ConnectionException("Modbus client did not report connected state.")
+                    raise ConnectionException(
+                        "Modbus client did not report connected state."
+                    )
 
-                _LOGGER.info("Successfully connected to Modbus server %s:%s.", self._host, self._port)
+                _LOGGER.info(
+                    "Successfully connected to Modbus server %s:%s.",
+                    self._host,
+                    self._port,
+                )
 
             except Exception as e:
                 await self._safe_close()
                 await asyncio.sleep(0.20)
-                _LOGGER.warning("Error during Modbus connection attempt: %s", e, exc_info=True)
+                _LOGGER.warning(
+                    "Error during Modbus connection attempt: %s", e, exc_info=True
+                )
                 raise ConnectionException("Failed to connect to Modbus server.") from e
 
     async def _reset_connection_after_error(self) -> None:
@@ -241,7 +251,9 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
 
                 async with self._read_lock:
                     if not self._client or not self._client.connected:
-                        raise ConnectionException("Modbus client is not connected before read.")
+                        raise ConnectionException(
+                            "Modbus client is not connected before read."
+                        )
 
                     async with asyncio.timeout(self.READ_TIMEOUT_SECONDS):
                         response = await self._client.read_holding_registers(
@@ -404,22 +416,30 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                 ok_count = 0
                 ok_count += int(
                     await self._run_read_block(
-                        "device_data", self.read_modbus_device_data, all_read_data
+                        "device_data",
+                        self.read_modbus_device_data,
+                        all_read_data,
                     )
                 )
                 ok_count += int(
                     await self._run_read_block(
-                        "realtime_data", self.read_modbus_realtime_data, all_read_data
+                        "realtime_data",
+                        self.read_modbus_realtime_data,
+                        all_read_data,
                     )
                 )
                 ok_count += int(
                     await self._run_read_block(
-                        "grid_ac_data", self.read_modbus_grid_ac_data, all_read_data
+                        "grid_ac_data",
+                        self.read_modbus_grid_ac_data,
+                        all_read_data,
                     )
                 )
                 ok_count += int(
                     await self._run_read_block(
-                        "longterm_data", self.read_modbus_longterm_data, all_read_data
+                        "longterm_data",
+                        self.read_modbus_longterm_data,
+                        all_read_data,
                     )
                 )
                 ok_count += int(
@@ -431,7 +451,9 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                 )
 
                 if ok_count == 0 and not all_read_data:
-                    raise ConnectionException("All Modbus read blocks failed and no cached data exists.")
+                    raise ConnectionException(
+                        "All Modbus read blocks failed and no cached data exists."
+                    )
 
                 if ok_count == 0:
                     self._failure_count += 1
@@ -650,7 +672,7 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
             _LOGGER.error("Error decoding Int16 at address %s: %s", hex(address), e)
             return None
 
-        async def read_modbus_battery_health_data(self) -> dict:
+    async def read_modbus_battery_health_data(self) -> dict:
         """Read battery / BMS health data from peripheral device register block.
 
         Register range:
