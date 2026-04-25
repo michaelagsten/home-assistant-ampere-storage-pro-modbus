@@ -11,6 +11,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT, CONF_SCAN_INTERVAL
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import device_registry as dr
 
 from .const import (
     CONF_UNIT,
@@ -158,6 +159,27 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         DOMAIN,
         entry.title or entry.data.get(CONF_NAME, DEFAULT_NAME),
     )
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    device_entry: dr.DeviceEntry,
+) -> bool:
+    """Allow Home Assistant to remove stale devices for this config entry.
+
+    This integration creates devices from entity device_info. If an older device
+    remains in the device registry after device_info changes or sensor
+    consolidation, Home Assistant asks this hook whether the device may be
+    removed. Returning True allows removal from the UI.
+    """
+    _LOGGER.debug(
+        "Allowing removal of device '%s' for %s entry '%s'.",
+        device_entry.name_by_user or device_entry.name or device_entry.id,
+        DOMAIN,
+        entry.title or entry.data.get(CONF_NAME, DEFAULT_NAME),
+    )
+    return True
 
 
 def _get_hub(
