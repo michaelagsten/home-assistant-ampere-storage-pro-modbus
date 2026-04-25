@@ -46,7 +46,7 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
     # 0xA000..0xA023 contains battery count, capacity, online mask and
     # SOC/SOH/voltage/current/temperature/cycles for up to 4 battery modules.
     BATTERY_DATA_START_REGISTER = 0xA000
-    BATTERY_DATA_REGISTER_COUNT = 0x0024
+    BATTERY_DATA_REGISTER_COUNT = 0x0012
 
     # Short delay between requests. Important when KiwiGrid/other clients also
     # access the inverter and when the inverter's Modbus TCP stack is slow.
@@ -650,16 +650,16 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
             _LOGGER.error("Error decoding Int16 at address %s: %s", hex(address), e)
             return None
 
-    async def read_modbus_battery_health_data(self) -> dict:
+        async def read_modbus_battery_health_data(self) -> dict:
         """Read battery / BMS health data from peripheral device register block.
 
         Register range:
-        - 0xA000: battery module count
+        - 0xA000: battery module / stack count
         - 0xA001: battery capacity [Ah]
         - 0xA00A: available battery capacity
         - 0xA00B: battery online mask
-        - 0xA00C..0xA023: SOC, SOH, voltage, current, temperature, cycles
-          for battery modules 1..4
+        - 0xA00C..0xA011: SOC, SOH, voltage, current, temperature, cycles
+          for the reported battery stack.
         """
         start_address = self.BATTERY_DATA_START_REGISTER
 
@@ -689,71 +689,19 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
         data["battery_available_capacity"] = battery_available_capacity
         data["battery_online_mask"] = battery_online_mask
 
-        module_registers = {
-            1: {
-                "soc": 0xA00C,
-                "soh": 0xA00D,
-                "voltage": 0xA00E,
-                "current": 0xA00F,
-                "temperature": 0xA010,
-                "cycles": 0xA011,
-            },
-            2: {
-                "soc": 0xA012,
-                "soh": 0xA013,
-                "voltage": 0xA014,
-                "current": 0xA015,
-                "temperature": 0xA016,
-                "cycles": 0xA017,
-            },
-            3: {
-                "soc": 0xA018,
-                "soh": 0xA019,
-                "voltage": 0xA01A,
-                "current": 0xA01B,
-                "temperature": 0xA01C,
-                "cycles": 0xA01D,
-            },
-            4: {
-                "soc": 0xA01E,
-                "soh": 0xA01F,
-                "voltage": 0xA020,
-                "current": 0xA021,
-                "temperature": 0xA022,
-                "cycles": 0xA023,
-            },
-        }
+        soc_raw = self._decode_uint16_at(register_list, start_address, 0xA00C)
+        soh_raw = self._decode_uint16_at(register_list, start_address, 0xA00D)
+        voltage_raw = self._decode_uint16_at(register_list, start_address, 0xA00E)
+        current_raw = self._decode_int16_at(register_list, start_address, 0xA00F)
+        temperature_raw = self._decode_int16_at(register_list, start_address, 0xA010)
+        cycles_raw = self._decode_uint16_at(register_list, start_address, 0xA011)
 
-        for module_id, registers in module_registers.items():
-            soc_raw = self._decode_uint16_at(
-                register_list, start_address, registers["soc"]
-            )
-            soh_raw = self._decode_uint16_at(
-                register_list, start_address, registers["soh"]
-            )
-            voltage_raw = self._decode_uint16_at(
-                register_list, start_address, registers["voltage"]
-            )
-            current_raw = self._decode_int16_at(
-                register_list, start_address, registers["current"]
-            )
-            temperature_raw = self._decode_int16_at(
-                register_list, start_address, registers["temperature"]
-            )
-            cycles_raw = self._decode_uint16_at(
-                register_list, start_address, registers["cycles"]
-            )
-
-            prefix = f"battery_{module_id}"
-
-            data[f"{prefix}_soc"] = self._scale_value(soc_raw, 0.01, 2)
-            data[f"{prefix}_soh"] = self._scale_value(soh_raw, 0.01, 2)
-            data[f"{prefix}_voltage"] = self._scale_value(voltage_raw, 0.1, 1)
-            data[f"{prefix}_current"] = self._scale_value(current_raw, 0.01, 2)
-            data[f"{prefix}_temperature"] = self._scale_value(
-                temperature_raw, 0.1, 1
-            )
-            data[f"{prefix}_cycles"] = cycles_raw
+        data["battery_1_soc"] = self._scale_value(soc_raw, 0.01, 2)
+        data["battery_1_soh"] = self._scale_value(soh_raw, 0.01, 2)
+        data["battery_1_voltage"] = self._scale_value(voltage_raw, 0.1, 1)
+        data["battery_1_current"] = self._scale_value(current_raw, 0.01, 2)
+        data["battery_1_temperature"] = self._scale_value(temperature_raw, 0.1, 1)
+        data["battery_1_cycles"] = cycles_raw
 
         return data
 
