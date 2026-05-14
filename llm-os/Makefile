@@ -59,6 +59,8 @@ OBJS :=             \
     drivers/uart.o  \
     kernel/mm.o     \
     kernel/main.o   \
+    sd/sd.o         \
+    sd/fat32.o      \
     shell/shell.o
 
 # ---- Build rules ---------------------------------------------------
@@ -89,3 +91,9 @@ disasm: $(ELF)
 clean:
 	rm -f $(OBJS) $(ELF) $(TARGET)
 	@printf "  CLEAN  done\n"
+
+# Verify the cross-compiler is installed
+check-toolchain:
+	@which $(CC) >/dev/null 2>&1 || \
+		(echo "Install: sudo apt install gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu" && exit 1)
+	@printf "  TOOLCHAIN  %s OK\n" $(CC)
