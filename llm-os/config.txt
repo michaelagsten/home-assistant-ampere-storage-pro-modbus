@@ -1,0 +1,26 @@
+# Raspberry Pi 5 — SD card boot configuration for LLM-OS
+#
+# Place this file together with kernel8.img and MODEL.GGUF
+# on the FAT32 boot partition of a microSD card.
+#
+# The firmware (start4.elf / bootcode.bin) reads this file before
+# loading our bare-metal image.
+
+# Load our AArch64 binary (produced by 'make')
+kernel=kernel8.img
+arm_64bit=1
+
+# Enable the primary UART (GPIO14 TX / GPIO15 RX, 115200 baud 8N1).
+# This lets the firmware configure the RP1 GPIO mux before our code runs,
+# so uart_init() can find the UART ready without any GPIO setup of our own.
+enable_uart=1
+
+# Disable Bluetooth (it shares the UART on RPi5; we want the UART for ourselves)
+dtoverlay=disable-bt
+
+# Give the GPU the minimum VRAM (64 MB) so the ARM side gets as much RAM
+# as possible for model weights and KV-cache.
+gpu_mem=64
+
+# Disable on-board Wi-Fi to save power and reduce interrupt noise
+dtoverlay=disable-wifi
