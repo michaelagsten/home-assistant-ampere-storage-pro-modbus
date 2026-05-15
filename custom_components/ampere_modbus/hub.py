@@ -53,6 +53,7 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
     READ_PACING_SECONDS = 0.20
 
     CONNECT_TIMEOUT_SECONDS = 10.0
+    CONNECT_SETTLE_SECONDS = 0.60
     READ_TIMEOUT_SECONDS = 15.0
     UPDATE_TIMEOUT_SECONDS = 90.0
     CLOSE_TIMEOUT_SECONDS = 5.0
@@ -196,7 +197,7 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                 await asyncio.wait_for(
                     self._client.connect(), timeout=self.CONNECT_TIMEOUT_SECONDS
                 )
-                await asyncio.sleep(0.30)
+                await asyncio.sleep(self.CONNECT_SETTLE_SECONDS)
 
                 if not self._client.connected:
                     raise ConnectionException(
