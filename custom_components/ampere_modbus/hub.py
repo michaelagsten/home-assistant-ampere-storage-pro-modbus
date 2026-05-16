@@ -210,6 +210,10 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                     self._port,
                 )
 
+            except asyncio.CancelledError:
+                await self._safe_close()
+                raise
+
             except Exception as e:
                 await self._safe_close()
                 await asyncio.sleep(0.20)
@@ -282,12 +286,15 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
                 await asyncio.sleep(self.READ_PACING_SECONDS)
                 return response.registers
 
+            except asyncio.CancelledError:
+                await self._reset_connection_after_error()
+                raise
+
             except (
                 ModbusIOException,
                 ConnectionException,
                 AttributeError,
                 asyncio.TimeoutError,
-                asyncio.CancelledError,
             ) as e:
                 last_error = e
                 _LOGGER.warning(
