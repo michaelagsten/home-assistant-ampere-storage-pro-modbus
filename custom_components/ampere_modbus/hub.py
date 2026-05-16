@@ -906,72 +906,89 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
         return data
 
     async def read_modbus_longterm_data(self) -> dict:
-        register_list = await self.read_holding_registers(self._unit, 0x40BF, 184)
-        position = 0
+        """Read long-term energy counter data.
+
+        Split into two targeted blocks to avoid the reserved register gap
+        0x40D7–0x4166 that causes invalid Modbus responses on SAJ H2 devices
+        (same root cause as the realtime-data split at 0x4087).
+
+        - 0x40BF–0x40D6: PV generation and battery charge/discharge counters
+        - 0x4167–0x4176: Grid import/export energy counters
+        """
         data = {}
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        # ------------------------------------------------------------------
+        # Block 1: PV generation and battery charge/discharge counters
+        # 0x40BF..0x40D6  (24 registers = 12 x UInt32)
+        # ------------------------------------------------------------------
+        pv_bat_registers = await self.read_holding_registers(self._unit, 0x40BF, 24)
+        position = 0
+
+        value, position = self.decode_32bit_uint(pv_bat_registers, position)
         data["dailypvgeneration"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(pv_bat_registers, position)
         data["monthpvgeneration"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(pv_bat_registers, position)
         data["yearpvgeneration"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(pv_bat_registers, position)
         data["totalpvgeneration"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(pv_bat_registers, position)
         data["dailychargebattery"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(pv_bat_registers, position)
         data["monthchargebattery"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(pv_bat_registers, position)
         data["yearchargebattery"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(pv_bat_registers, position)
         data["totalchargebattery"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(pv_bat_registers, position)
         data["dailydischargebattery"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(pv_bat_registers, position)
         data["monthdischargebattery"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(pv_bat_registers, position)
         data["yeardischargebattery"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(pv_bat_registers, position)
         data["totaldischargebattery"] = round(value * 0.01, 2)
 
-        target_offset = 0x4167 - 0x40BF
-        if position < target_offset:
-            position = target_offset
+        # ------------------------------------------------------------------
+        # Block 2: Grid import/export energy counters
+        # 0x4167..0x4176  (16 registers = 8 x UInt32)
+        # ------------------------------------------------------------------
+        grid_registers = await self.read_holding_registers(self._unit, 0x4167, 16)
+        position = 0
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(grid_registers, position)
         data["dailygridimportenergy"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(grid_registers, position)
         data["monthgridimportenergy"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(grid_registers, position)
         data["yeargridimportenergy"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(grid_registers, position)
         data["totalgridimportenergy"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(grid_registers, position)
         data["dailygridexportenergy"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(grid_registers, position)
         data["monthgridexportenergy"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(grid_registers, position)
         data["yeargridexportenergy"] = round(value * 0.01, 2)
 
-        value, position = self.decode_32bit_uint(register_list, position)
+        value, position = self.decode_32bit_uint(grid_registers, position)
         data["totalgridexportenergy"] = round(value * 0.01, 2)
 
         return data
