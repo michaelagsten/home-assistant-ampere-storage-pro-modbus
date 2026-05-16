@@ -697,6 +697,7 @@ class AmpereStorageProModbusHub(DataUpdateCoordinator[dict]):
             self._unit,
             start_address,
             self.BATTERY_DATA_REGISTER_COUNT,
+            max_retries=0,
         )
 
         data: dict = {}
